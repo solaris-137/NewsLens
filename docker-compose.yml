@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: applenews
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  ingestion:
+    build: ./ingestion
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    restart: on-failure
+
+  nlp:
+    build: ./nlp
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - .env
+    restart: on-failure
+    volumes:
+      - ./nlp/models:/models
+
+  api:
+    build: ./api
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: on-failure
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
