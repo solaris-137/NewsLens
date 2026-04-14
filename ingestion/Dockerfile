@@ -8,4 +8,4 @@ RUN playwright install chromium --with-deps
 
 COPY . .
 
-CMD ["sh", "-c", "python ingestion.py && tail -f /dev/null"]
+CMD ["sh", "-c", "python ingestion.py & python cleaner.py & wait"]
