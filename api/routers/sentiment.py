@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cache import cache_get, cache_set
 from db import get_db
 from models import Article
+from monitoring import avg_sentiment_measure, record_metric
 from rate_limit import limiter
 
 router = APIRouter()
@@ -19,6 +20,17 @@ def _bucket_iso(value: datetime) -> str:
     return value.isoformat().replace("+00:00", "Z")
 
 
+def _overall_avg_composite(hours: list[dict]) -> float:
+    total_count = sum(int(hour["count"]) for hour in hours)
+    if total_count == 0:
+        return 0.0
+
+    composite_total = sum(
+        float(hour["avg_composite"]) * int(hour["count"]) for hour in hours
+    )
+    return round(composite_total / total_count, 4)
+
+
 @router.get("/api/sentiment/summary")
 @limiter.limit("100/minute")
 async def get_sentiment_summary(
@@ -27,6 +39,7 @@ async def get_sentiment_summary(
 ):
     cached = await cache_get(CACHE_KEY)
     if cached is not None:
+        record_metric(avg_sentiment_measure, _overall_avg_composite(cached))
         return cached
 
     since = datetime.utcnow() - timedelta(hours=24)
@@ -82,4 +95,5 @@ async def get_sentiment_summary(
         response.append(bucket)
 
     await cache_set(CACHE_KEY, response, 300)
+    record_metric(avg_sentiment_measure, _overall_avg_composite(response))
     return response

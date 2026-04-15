@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import psycopg2
 import redis as redis_sync
+import sentry_sdk
 import spacy
 from psycopg2 import InterfaceError, OperationalError
 from psycopg2.extras import Json
@@ -29,6 +30,7 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 DATABASE_URL = os.environ["DATABASE_URL"]
 AZURE_SERVICE_BUS_CONN_STR = os.environ.get("AZURE_SERVICE_BUS_CONN_STR", "")
 AZURE_APPINSIGHTS_CONN_STR = os.environ.get("AZURE_APPINSIGHTS_CONN_STR", "")
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
 
 CATEGORY_KEYWORDS = {
     "earnings": [
@@ -189,6 +191,13 @@ ON CONFLICT (id) DO NOTHING
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=0.2,
+        profiles_sample_rate=0.1,
+    )
 
 redis_client = redis_sync.from_url(REDIS_URL, decode_responses=True)
 sentiment_pipeline = None
@@ -605,6 +614,26 @@ def increment_counter(name: str) -> None:
     redis_client.incr(f"{name}:{today}")
 
 
+def set_sentry_article_context(article_id: str, source: str | None) -> None:
+    with sentry_sdk.configure_scope() as scope:
+        scope.set_tag("article.source", source or "unknown")
+        scope.set_context(
+            "article",
+            {
+                "id": article_id,
+                "source": source or "unknown",
+            },
+        )
+
+
+def capture_pipeline_error(error: Exception, article: dict[str, Any]) -> None:
+    with sentry_sdk.push_scope() as scope:
+        scope.set_extra("article_id", article.get("id"))
+        scope.set_extra("article_url", article.get("url"))
+        scope.set_extra("source", article.get("source"))
+        sentry_sdk.capture_exception(error)
+
+
 def publish_processed_article(
     article: dict[str, Any],
     summary: str,
@@ -664,6 +693,7 @@ def process_article(message: QueueMessage) -> None:
     article = message.payload
     article_id = article.get("id", "unknown")
     started_at = time.perf_counter()
+    set_sentry_article_context(article_id, article.get("source"))
 
     try:
         title = article.get("title", "")
@@ -698,6 +728,7 @@ def process_article(message: QueueMessage) -> None:
         message.ack()
     except Exception as exc:
         increment_counter("stats:nlp_errors")
+        capture_pipeline_error(exc, article)
         logger.exception(f"NLP_ERROR | id={article_id} | {exc}")
         handle_failed_message(message, f"{exc.__class__.__name__}: {exc}")
 

@@ -3,18 +3,21 @@ import contextlib
 import json
 import logging
 import os
+import time
 
+import sentry_sdk
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from cache import redis_client
+from monitoring import init_app_insights, register_views
 from rate_limit import limiter
 
 if dsn := os.environ.get("SENTRY_DSN"):
-    import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
 
     sentry_sdk.init(
@@ -39,10 +42,34 @@ logger = logging.getLogger(__name__)
 
 connected_clients: set[WebSocket] = set()
 
+
+class SlowRequestMiddleware(BaseHTTPMiddleware):
+    THRESHOLD_MS = 2000
+
+    async def dispatch(self, request, call_next):
+        start = time.time()
+        try:
+            return await call_next(request)
+        finally:
+            duration_ms = (time.time() - start) * 1000
+            if duration_ms > self.THRESHOLD_MS:
+                with sentry_sdk.push_scope() as scope:
+                    scope.set_extra("duration_ms", round(duration_ms, 2))
+                    scope.set_extra("path", request.url.path)
+                    sentry_sdk.capture_message(
+                        (
+                            f"Slow request: {request.method} {request.url.path} "
+                            f"took {duration_ms:.0f}ms"
+                        ),
+                        level="warning",
+                    )
+
+
 app = FastAPI(title="Apple Sentiment API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(SlowRequestMiddleware)
 
 origins = ["http://localhost:3000"]
 if PRODUCTION_DOMAIN:
@@ -153,6 +180,8 @@ async def service_bus_listener():
 
 @app.on_event("startup")
 async def startup():
+    init_app_insights()
+    register_views()
     app.state.listener_task = asyncio.create_task(service_bus_listener())
 
 

@@ -1,9 +1,12 @@
+import { useMemo } from "react";
+
 import { useQuery } from "@tanstack/react-query";
-import { format, parseISO } from "date-fns";
+import { formatDistanceToNow, parseISO } from "date-fns";
 import {
   Bar,
   BarChart,
   Cell,
+  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -12,7 +15,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { fetchFeed, fetchHealth, fetchMetricsText, fetchSentimentSummary } from "@/api";
+import { fetchFeed, fetchHealth, fetchSentimentSummary } from "@/api";
 
 const STATUS_DOT: Record<string, string> = {
   ok: "bg-green-500",
@@ -20,73 +23,60 @@ const STATUS_DOT: Record<string, string> = {
   down: "bg-red-500",
 };
 
-function parseMetric(metricsText: string | undefined, metricName: string) {
-  if (!metricsText) {
-    return null;
-  }
-
-  const line = metricsText
-    .split("\n")
-    .find((entry) => entry.startsWith(`${metricName} `));
-
-  if (!line) {
-    return null;
-  }
-
-  const value = Number(line.split(" ").at(-1));
-  return Number.isFinite(value) ? value : null;
-}
-
 export default function Monitoring() {
   const { data: health } = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
     refetchInterval: 30 * 1000,
   });
-  const { data: sentiment } = useQuery({
+  const { data: sentimentData } = useQuery({
     queryKey: ["sentiment-summary"],
     queryFn: fetchSentimentSummary,
+    refetchInterval: 5 * 60 * 1000,
   });
-  const { data: feed } = useQuery({
-    queryKey: ["feed", "monitoring", 100],
+  const { data: feedData } = useQuery({
+    queryKey: ["feed-monitoring"],
     queryFn: () => fetchFeed({ limit: 100, offset: 0 }),
-  });
-  const { data: metricsText } = useQuery({
-    queryKey: ["metrics-text"],
-    queryFn: fetchMetricsText,
-    refetchInterval: 30 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 
-  const donutData = sentiment
-    ? [
-        {
-          name: "Positive",
-          value: sentiment.reduce((sum, hour) => sum + hour.positive_count, 0),
-          fill: "#22c55e",
-        },
-        {
-          name: "Negative",
-          value: sentiment.reduce((sum, hour) => sum + hour.negative_count, 0),
-          fill: "#ef4444",
-        },
-        {
-          name: "Neutral",
-          value: sentiment.reduce((sum, hour) => sum + hour.neutral_count, 0),
-          fill: "#94a3b8",
-        },
-      ]
-    : [];
+  const sourceData = useMemo(() => {
+    if (!feedData) {
+      return [];
+    }
 
-  const sourceMap = new Map<string, number>();
-  for (const article of feed?.articles ?? []) {
-    sourceMap.set(article.source, (sourceMap.get(article.source) ?? 0) + 1);
-  }
-  const sourceData = Array.from(sourceMap.entries()).map(([source, count]) => ({
-    source,
-    count,
-  }));
+    const counts: Record<string, number> = {};
+    feedData.articles.forEach((article) => {
+      counts[article.source] = (counts[article.source] ?? 0) + 1;
+    });
 
-  const latestLatency = parseMetric(metricsText, "pipeline_latency_ms");
+    return Object.entries(counts).map(([source, count]) => ({ source, count }));
+  }, [feedData]);
+
+  const donutData = useMemo(() => {
+    if (!sentimentData) {
+      return [];
+    }
+
+    const positive = sentimentData.reduce(
+      (sum, hour) => sum + hour.positive_count,
+      0,
+    );
+    const negative = sentimentData.reduce(
+      (sum, hour) => sum + hour.negative_count,
+      0,
+    );
+    const neutral = sentimentData.reduce(
+      (sum, hour) => sum + hour.neutral_count,
+      0,
+    );
+
+    return [
+      { name: "Positive", value: positive, color: "#22c55e" },
+      { name: "Negative", value: negative, color: "#ef4444" },
+      { name: "Neutral", value: neutral, color: "#9ca3af" },
+    ];
+  }, [sentimentData]);
 
   return (
     <div className="space-y-8">
@@ -103,7 +93,11 @@ export default function Monitoring() {
                 if (typeof value !== "object" || value === null) {
                   return null;
                 }
-                const status = value.status ?? "unknown";
+                const check = value as {
+                  status?: string;
+                  latency_ms?: number;
+                };
+                const status = check.status ?? "unknown";
                 return (
                   <tr key={key} className="border-b border-slate-100">
                     <td className="py-2 pr-4 capitalize text-slate-600">
@@ -118,7 +112,7 @@ export default function Monitoring() {
                       <span className="ml-2 capitalize">{status}</span>
                     </td>
                     <td className="py-2 text-slate-400">
-                      {value.latency_ms != null ? `${value.latency_ms}ms` : ""}
+                      {check.latency_ms != null ? `${check.latency_ms}ms` : ""}
                     </td>
                   </tr>
                 );
@@ -126,28 +120,27 @@ export default function Monitoring() {
           </tbody>
         </table>
 
-        <div className="mt-4 grid gap-4 text-sm text-slate-500 md:grid-cols-2 xl:grid-cols-5">
-          <div>
-            Last ingestion
-            <br />
-            <span className="font-medium text-slate-800">
+        <div className="mt-6 grid gap-4 text-sm md:grid-cols-3">
+          <div className="rounded-lg bg-slate-50 p-4">
+            <p className="text-slate-500">Last Ingestion</p>
+            <p className="mt-1 font-semibold text-slate-900">
               {health?.checks.last_ingestion
-                ? format(parseISO(health.checks.last_ingestion), "HH:mm:ss")
+                ? formatDistanceToNow(parseISO(health.checks.last_ingestion), {
+                    addSuffix: true,
+                  })
                 : "-"}
-            </span>
+            </p>
           </div>
-          <div>
-            Articles today
-            <br />
-            <span className="font-medium text-slate-800">
+          <div className="rounded-lg bg-slate-50 p-4">
+            <p className="text-slate-500">Articles (24hr)</p>
+            <p className="mt-1 font-semibold text-slate-900">
               {health?.checks.articles_24hr ?? "-"}
-            </span>
+            </p>
           </div>
-          <div>
-            Overall status
-            <br />
-            <span
-              className={`font-medium ${
+          <div className="rounded-lg bg-slate-50 p-4">
+            <p className="text-slate-500">System Status</p>
+            <p
+              className={`mt-1 font-semibold ${
                 health?.status === "ok"
                   ? "text-green-600"
                   : health?.status === "degraded"
@@ -156,19 +149,7 @@ export default function Monitoring() {
               }`}
             >
               {health?.status ?? "-"}
-            </span>
-          </div>
-          <div>
-            Pipeline latency
-            <br />
-            <span className="font-medium text-slate-800">
-              {latestLatency != null ? `${latestLatency.toFixed(0)} ms` : "-"}
-            </span>
-          </div>
-          <div>
-            Extraction fail rate
-            <br />
-            <span className="font-medium text-slate-800">Not exposed</span>
+            </p>
           </div>
         </div>
       </section>
@@ -184,30 +165,20 @@ export default function Monitoring() {
                 data={donutData}
                 dataKey="value"
                 nameKey="name"
-                innerRadius={68}
-                outerRadius={104}
+                cx="50%"
+                cy="50%"
+                innerRadius={55}
+                outerRadius={80}
                 paddingAngle={3}
               >
                 {donutData.map((entry) => (
-                  <Cell key={entry.name} fill={entry.fill} />
+                  <Cell key={entry.name} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(value, name) => [`${value} articles`, name]} />
+              <Legend />
             </PieChart>
           </ResponsiveContainer>
-          <div className="mt-4 flex gap-4 text-sm text-slate-500">
-            {donutData.map((entry) => (
-              <div key={entry.name} className="flex items-center gap-2">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: entry.fill }}
-                />
-                <span>
-                  {entry.name}: {entry.value}
-                </span>
-              </div>
-            ))}
-          </div>
         </section>
 
         <section className="rounded-3xl border border-slate-200/70 bg-white/85 p-6 shadow-sm">

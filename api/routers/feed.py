@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
 from models import Article
+from monitoring import articles_processed_measure, record_metric
 from rate_limit import limiter
 
 router = APIRouter()
@@ -77,10 +78,12 @@ async def get_feed(
     )
     article_result = await db.execute(articles_query)
     articles = article_result.scalars().all()
+    payload = [_serialize_article(article) for article in articles]
+    record_metric(articles_processed_measure, len(payload))
 
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "articles": [_serialize_article(article) for article in articles],
+        "articles": payload,
     }

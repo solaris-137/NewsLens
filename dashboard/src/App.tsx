@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 
 import Navbar from "@/components/Navbar";
+import SentryFeedback from "@/components/SentryFeedback";
 import Dashboard from "@/pages/Dashboard";
 import Monitoring from "@/pages/Monitoring";
 
@@ -14,6 +15,7 @@ export default function App() {
           <Route path="/monitoring" element={<Monitoring />} />
         </Routes>
       </main>
+      <SentryFeedback />
     </div>
   );
 }
