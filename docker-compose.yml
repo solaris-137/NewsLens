@@ -32,7 +32,7 @@ services:
       - .env
     restart: on-failure
     volumes:
-      - ./nlp/models:/models
+      - finbert_models:/models
 
   api:
     build: ./api
@@ -51,4 +51,5 @@ services:
       - "3000:3000"
 
 volumes:
+  finbert_models:
   postgres_data:
