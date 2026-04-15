@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #111827;
+  background:
+    radial-gradient(circle at top left, rgba(191, 219, 254, 0.55), transparent 34%),
+    radial-gradient(circle at top right, rgba(254, 215, 170, 0.45), transparent 30%),
+    #f8fafc;
+  font-family:
+    "IBM Plex Sans",
+    "Avenir Next",
+    "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+@layer utilities {
+  .line-clamp-2 {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
